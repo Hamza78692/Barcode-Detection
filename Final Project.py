@@ -1,63 +1,62 @@
-import streamlit as st
-import cv2 as cv
 import numpy as np
 from PIL import Image
+import matplotlib.pyplot as plt
 
-# Load Haar cascade classifiers
-face_cascade = cv.CascadeClassifier(cv.data.haarcascades + 'haarcascade_frontalface_default.xml')
-eye_cascade = cv.CascadeClassifier(cv.data.haarcascades + 'haarcascade_eye_tree_eyeglasses.xml')
-smile_cascade = cv.CascadeClassifier(cv.data.haarcascades + 'haarcascade_smile.xml')
+# Convert the image to grayscale
+def rgb2gray(image):
+    return np.dot(image[...,:3], [0.2989, 0.5870, 0.1140])
 
-def detect_and_display(frame):
-    gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+# Apply Sobel filter for edge detection
+def sobel_filter(image):
+    Kx = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
+    Ky = np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
 
-    faces = face_cascade.detectMultiScale(gray, 1.5, 5)
-    for (x, y, w, h) in faces:
-        cv.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 3)
-        cv.putText(frame, 'Face', (x, y - 10), cv.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-        roi_gray = gray[y:y + h, x:x + w]
-        roi_color = frame[y:y + h, x:x + w]
+    Ix = convolve(image, Kx)
+    Iy = convolve(image, Ky)
 
-        # Detect eyes
-        eyes = eye_cascade.detectMultiScale(roi_gray, 1.3, 5)
-        for (ex, ey, ew, eh) in eyes:
-            cv.rectangle(roi_color, (ex, ey), (ex + ew, ey + eh), (0, 0, 255), 3)
-            cv.putText(roi_color, 'Eye', (ex, ey - 10), cv.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+    G = np.hypot(Ix, Iy)
+    G = G / G.max() * 255
+    return G
 
-        # Detect smile
-        smiles = smile_cascade.detectMultiScale(roi_gray, 1.3, 5)
-        for (sx, sy, sw, sh) in smiles:
-            cv.rectangle(roi_color, (sx, sy), (sx + sw, sy + sh), (255, 0, 0), 3)
-            cv.putText(roi_color, 'Smile', (sx, sy - 10), cv.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+# Convolution operation
+def convolve(image, kernel):
+    image_h, image_w = image.shape
+    kernel_h, kernel_w = kernel.shape
+    pad_h = kernel_h // 2
+    pad_w = kernel_w // 2
 
-    return frame
+    # Pad the image
+    padded_image = np.pad(image, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant')
 
-def main():
-    st.title("Real-time Face, Eye, and Smile Detection")
+    # Output image
+    output = np.zeros(image.shape)
+
+    # Convolution operation
+    for x in range(image_w):
+        for y in range(image_h):
+            output[y, x] = np.sum(kernel * padded_image[y: y + kernel_h, x: x + kernel_w])
+
+    return output
+
+# Simple barcode detection
+def detect_barcode(image):
+    gray_image = rgb2gray(image)
+    edges = sobel_filter(gray_image)
     
-    # Placeholder for the video
-    video_placeholder = st.empty()
-    
-    cap = cv.VideoCapture(0)
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            st.error("Failed to capture image.")
-            break
-        
-        frame = detect_and_display(frame)
-        
-        # Convert frame to RGB (OpenCV uses BGR by default)
-        frame_rgb = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-        img = Image.fromarray(frame_rgb)
-        
-        video_placeholder.image(img, use_column_width=True)
-        
-        if st.button('Stop'):
-            break
-    
-    cap.release()
+    # Average the rows to find the barcode pattern (vertical lines)
+    row_sums = np.mean(edges, axis=1)
 
-if __name__ == "__main__":
-    main()
+    plt.subplot(1, 2, 1)
+    plt.imshow(gray_image, cmap='gray')
+    plt.title('Grayscale Image')
+
+    plt.subplot(1, 2, 2)
+    plt.plot(row_sums)
+    plt.title('Detected Barcode Pattern')
+    plt.show()
+
+# Load the image
+image = np.array(Image.open('barcode_image.png'))
+
+# Detect the barcode
+detect_barcode(image)
