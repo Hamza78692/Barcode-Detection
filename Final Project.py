@@ -1,62 +1,58 @@
+import cv2
 import numpy as np
-from PIL import Image
-import matplotlib.pyplot as plt
 
-# Convert the image to grayscale
-def rgb2gray(image):
-    return np.dot(image[...,:3], [0.2989, 0.5870, 0.1140])
+def detect_barcode(image_path):
+    # Load the image
+    image = cv2.imread(image_path)
 
-# Apply Sobel filter for edge detection
-def sobel_filter(image):
-    Kx = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
-    Ky = np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
+    # Convert the image to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    Ix = convolve(image, Kx)
-    Iy = convolve(image, Ky)
+    # Use a gradient to highlight the barcode-like regions (strong horizontal edges)
+    gradientX = cv2.Sobel(gray, ddepth=cv2.CV_32F, dx=1, dy=0, ksize=-1)
+    gradientY = cv2.Sobel(gray, ddepth=cv2.CV_32F, dx=0, dy=1, ksize=-1)
 
-    G = np.hypot(Ix, Iy)
-    G = G / G.max() * 255
-    return G
+    # Subtract the y-gradient from the x-gradient
+    gradient = cv2.subtract(gradientX, gradientY)
+    gradient = cv2.convertScaleAbs(gradient)
 
-# Convolution operation
-def convolve(image, kernel):
-    image_h, image_w = image.shape
-    kernel_h, kernel_w = kernel.shape
-    pad_h = kernel_h // 2
-    pad_w = kernel_w // 2
+    # Apply a Gaussian blur to reduce noise
+    blurred = cv2.blur(gradient, (9, 9))
 
-    # Pad the image
-    padded_image = np.pad(image, ((pad_h, pad_h), (pad_w, pad_w)), mode='constant')
+    # Threshold the image
+    _, thresh = cv2.threshold(blurred, 225, 255, cv2.THRESH_BINARY)
 
-    # Output image
-    output = np.zeros(image.shape)
+    # Perform closing (dilation followed by erosion) to close gaps between barcode bars
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 7))
+    closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
 
-    # Convolution operation
-    for x in range(image_w):
-        for y in range(image_h):
-            output[y, x] = np.sum(kernel * padded_image[y: y + kernel_h, x: x + kernel_w])
+    # Perform a series of erosions and dilations to clean up the image
+    closed = cv2.erode(closed, None, iterations=4)
+    closed = cv2.dilate(closed, None, iterations=4)
 
-    return output
+    # Find contours in the thresholded image
+    contours, _ = cv2.findContours(closed.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-# Simple barcode detection
-def detect_barcode(image):
-    gray_image = rgb2gray(image)
-    edges = sobel_filter(gray_image)
-    
-    # Average the rows to find the barcode pattern (vertical lines)
-    row_sums = np.mean(edges, axis=1)
+    # If no contours were found, return None
+    if len(contours) == 0:
+        return None
 
-    plt.subplot(1, 2, 1)
-    plt.imshow(gray_image, cmap='gray')
-    plt.title('Grayscale Image')
+    # Sort the contours by area and keep the largest one, assuming it's the barcode
+    c = sorted(contours, key=cv2.contourArea, reverse=True)[0]
 
-    plt.subplot(1, 2, 2)
-    plt.plot(row_sums)
-    plt.title('Detected Barcode Pattern')
-    plt.show()
+    # Compute the rotated bounding box of the largest contour
+    rect = cv2.minAreaRect(c)
+    box = cv2.boxPoints(rect)
+    box = np.int0(box)
 
-# Load the image
-image = np.array(Image.open('barcode_image.png'))
+    # Draw a bounding box around the detected barcode
+    cv2.drawContours(image, [box], -1, (0, 255, 0), 3)
 
-# Detect the barcode
-detect_barcode(image)
+    # Display the image with the detected barcode
+    cv2.imshow("Detected Barcode", image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+# Example usage:
+image_path = 'path_to_your_image.jpg'
+detect_barcode(image_path)
